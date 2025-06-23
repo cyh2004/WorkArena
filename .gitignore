@@ -186,6 +186,9 @@ node_modules/
 
 
 results/
+outputs/
+trace_profiling/
+trajectories_coords/
 
 # personal (optimass)
 ICML_deadline/

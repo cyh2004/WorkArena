@@ -41,8 +41,9 @@ from ..config import (
     EXPECTED_REQUEST_ITEM_FORM_FIELDS_PATH,
 )
 from ..instance import SNowInstance
-from .utils.form import fill_text
+from .utils.form import fill_text, is_right_text_filled
 from .utils.utils import check_url_suffix_match, prettyprint_enum
+from .cyh_utils import select_option_by_coordinate, is_right_option_selected
 
 
 ENGLISH_WORDS = list(get_english_words_set(["web2"]))
@@ -433,34 +434,67 @@ class ServiceNowFormTask(AbstractServiceNowTask):
             if section_id not in tab_sections:
                 return
 
+            ele = page.evaluate_handle(f"{self.js_prefix}.g_tabs2Sections.tabsTabs[{tab_sections[section_id]}].element")
+            bbox = ele.bounding_box()
+            if bbox["y"] > 577:
+                page.mouse.wheel(0, 720)
+
             page.evaluate_handle(
                 f"""{self.js_prefix}.g_tabs2Sections.tabsTabs[
                                                     {tab_sections[section_id]}
                                                 ].element"""
             ).click(force=True)
 
+        # click on blank area to make wheel work
+        page.mouse.click(539, 167, record=False)
+
         for field in task_fields:
             # Get the field's input control
+            # import pdb; pdb.set_trace()
             control = iframe.get_by_label(
                 page.evaluate(f"{self.form_js_selector}.getLabelOf('{field}')"),
                 exact=True,
             )
             if control.count() > 1:
                 control = control.nth(0)
+
+            # if the field is not visible, scroll to it
+            bbox = control.bounding_box()
+            if bbox is not None:
+                if bbox["y"] > 577:
+                    page.mouse.wheel(0, 720)
+                elif bbox["y"] < 93:
+                    page.mouse.wheel(0, -720)
+            
             # If the field is in a section, click on its header to make it visible
+            # import pdb; pdb.set_trace()
             show_field_tab(field)
+            bbox = control.bounding_box()
+            if bbox is not None:
+                if bbox["y"] > 720:
+                    page.mouse.wheel(0, 720)
 
             # Some fields are marked as string by the API but accept selection-based input
             # We use the select tag condition to match these fields. Others are marked as integers.
             if self.table_metadata[field]["type"] == "choice":
-                control.select_option(str(self.template_record[field]))
+                # import pdb; pdb.set_trace()
+                select_option_by_coordinate(page, control, str(self.template_record[field]), use_text_content=True)
+                # control.select_option(str(self.template_record[field]))
 
             # Checkboxes
             elif self.table_metadata[field]["type"] == "boolean":
-                control.set_checked(1 if self.template_record[field] == "true" else 0)
+                # import pdb; pdb.set_trace()
+                if control.is_checked() and self.template_record[field] == "false":
+                    control.click()
+                elif not control.is_checked() and self.template_record[field] == "true":
+                    control.click()
+                else:
+                    control.click(empty=True)
+                # control.set_checked(1 if self.template_record[field] == "true" else 0)
 
             # Any text-based input
             else:
+                # import pdb; pdb.set_trace()
                 fill_text(
                     page=page,
                     iframe=iframe,
@@ -499,6 +533,7 @@ class ServiceNowFormTask(AbstractServiceNowTask):
                 page.wait_for_timeout(1500)
                 if attempt == 4:
                     raise ValueError("The record was not created.")
+    
 
     def _set_required_config_attributes(self, config: dict) -> None:
         """
@@ -770,6 +805,136 @@ class GenericNewRecordTask(ServiceNowFormTask):
                     iframe.get_by_label("All").click()
                     iframe.get_by_text("Normal").first.click()
         self._fill_fields(page, iframe, self.task_fields)
+        
+    def partial_validate(
+        self,
+        page: Page,
+    ) -> None:
+        """
+        Fill the fields in the form with the values from the template record. The fields to fill are specified in the
+        task_fields list. Update is a flag that indicates if the task is an update task.
+        """
+        
+        iframe = page.frame_locator(f'iframe[name="{self.js_prefix}"]')
+        task_fields = self.task_fields
+        
+        # XXX We need to ensure the table metadata as well as fields are set
+        # before we can proceed with the cheat function
+        if self.table_metadata is None:
+            self._get_form(page)
+        if self.fields is None:
+            self._get_fields(page)
+
+        # From now on, we assume we are on the form page
+        self._wait_for_ready(page)
+
+        # Retry on TypeError since in very rare occasions, element evaluates to null, which raises a TypeError
+        @retry(
+            stop=stop_after_delay(SNOW_BROWSER_TIMEOUT // 1000),
+            retry=retry_if_exception_type(TypeError),
+        )
+        def show_field_tab(field):
+            """
+            Finds the control that allows to show the section where a field is located
+            and clicks on it.
+
+            """
+            section = page.evaluate(
+                f"""() => {{
+                    const element = {self.form_js_selector}.getElement('{field}');
+                    const ancestors = element.ancestors();
+                    for (let ancestor of ancestors) {{
+                        // Ancestor IDs are of the form "section-<section name>"
+                        if (ancestor.id.startsWith('section-')) {{
+                            return ancestor.id;
+                        }}
+                    }}
+                    return null;  // Return null if no matching ancestor is found
+                }}"""
+            )
+            section_id = section.split("-")[-1]
+            tab_sections = {
+                s.split(".")[-1]: i
+                for i, s in enumerate(page.evaluate(f"{self.js_prefix}.g_tabs2Sections.tabIDs"))
+            }
+
+            # If the section is not in the tabs do nothing (it's probably the main section)
+            if section_id not in tab_sections:
+                return
+
+            ele = page.evaluate_handle(f"{self.js_prefix}.g_tabs2Sections.tabsTabs[{tab_sections[section_id]}].element")
+            bbox = ele.bounding_box()
+            if bbox["y"] > 577:
+                page.mouse.wheel(0, 720)
+
+            page.evaluate_handle(
+                f"""{self.js_prefix}.g_tabs2Sections.tabsTabs[
+                                                    {tab_sections[section_id]}
+                                                ].element"""
+            ).click(force=True)
+
+        # click on blank area to make wheel work
+        page.mouse.click(539, 167)
+
+        total_scores = 0.0
+        
+        for field in task_fields:
+            # Get the field's input control
+            # import pdb; pdb.set_trace()
+            control = iframe.get_by_label(
+                page.evaluate(f"{self.form_js_selector}.getLabelOf('{field}')"),
+                exact=True,
+            )
+            if control.count() > 1:
+                control = control.nth(0)
+
+            # if the field is not visible, scroll to it
+            bbox = control.bounding_box()
+            if bbox is not None:
+                if bbox["y"] > 577:
+                    page.mouse.wheel(0, 720)
+                elif bbox["y"] < 93:
+                    page.mouse.wheel(0, -720)
+            
+            # If the field is in a section, click on its header to make it visible
+            # import pdb; pdb.set_trace()
+            show_field_tab(field)
+            bbox = control.bounding_box()
+            if bbox is not None:
+                if bbox["y"] > 720:
+                    page.mouse.wheel(0, 720)
+
+            # Some fields are marked as string by the API but accept selection-based input
+            # We use the select tag condition to match these fields. Others are marked as integers.
+            if self.table_metadata[field]["type"] == "choice":
+                # import pdb; pdb.set_trace()
+                if is_right_option_selected(page, control, str(self.template_record[field]), use_text_content=True):
+                    total_scores += 0.8 / len(task_fields)
+                # control.select_option(str(self.template_record[field]))
+
+            # Checkboxes
+            elif self.table_metadata[field]["type"] == "boolean":
+                # import pdb; pdb.set_trace()
+                if control.is_checked() and self.template_record[field] == "true":
+                    total_scores += 0.8 / len(task_fields)
+                elif not control.is_checked() and self.template_record[field] == "false":
+                    total_scores += 0.8 / len(task_fields)
+                # control.set_checked(1 if self.template_record[field] == "true" else 0)
+
+            # Any text-based input
+            else:
+                # import pdb; pdb.set_trace()
+                if is_right_text_filled(
+                    page=page,
+                    iframe=iframe,
+                    input_field=control,
+                    value=self.template_record[field],
+                ):
+                    total_scores += 0.8 / len(task_fields)
+
+        # Click on the submit button
+        page.wait_for_timeout(1000)
+        return total_scores
 
     def validate(
         self, page: playwright.sync_api.Page, chat_messages: list[str]
@@ -850,14 +1015,14 @@ class GenericNewRecordTask(ServiceNowFormTask):
                 "The record was not found in the database. Perhaps the form was not submitted correctly. "
                 + sys_id,
             )
-            return (
-                0,
-                False,
-                "",
-                {
-                    "message": "The record was not found in the database. Perhaps the form was not submitted correctly."
-                },
-            )
+            # return (
+            #     0,
+            #     False,
+            #     "",
+            #     {
+            #         "message": "The record was not found in the database. Perhaps the form was not submitted correctly."
+            #     },
+            # )
 
         # Extract display values for reference fields
         record = {

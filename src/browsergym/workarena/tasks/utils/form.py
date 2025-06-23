@@ -28,7 +28,7 @@ def fill_text(page, input_field, value, iframe=None):
     if input_field.get_attribute("aria-autocomplete") == "list" and value != "":
         # Fill in the value using a procedure that triggers the autocomplete
         input_field.fill(value[:-1])
-        page.keyboard.press(value[-1])
+        page.keyboard.press(value[-1], press_last_char=True)
         time.sleep(0.5)
 
         # Wait for the autocomplete menu to open and be ready
@@ -65,3 +65,25 @@ def fill_text(page, input_field, value, iframe=None):
     # All other normal text fields
     else:
         input_field.fill(value)
+        
+def is_right_text_filled(page, input_field, value, iframe=None):
+    """
+    Fills the value of text field, while handling autocomplete menus.
+
+    Parameters
+    ----------
+    page : playwright.sync_api.page.Page
+        The page object
+    input_field : playwright locator
+        The locator of the input field
+    value : str
+        The value to fill in
+    iframe : playwright locator, optional
+        The locator of the iframe that contains the input field, by default None
+
+    """
+    if input_field.text_content() == value:
+        return True
+    else:
+        return False
+

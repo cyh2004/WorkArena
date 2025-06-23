@@ -553,8 +553,11 @@ def check_all_columns_displayed(
         # Validate the number of lists on the page
         lst = lst.nth(0)
         js_selector = f"gsft_main.GlideList2.get('{lst.get_attribute('data-list_id')}')"
-        visible_columns = set(page.evaluate(f"{js_selector}.fields").split(","))
-
+        sleep(10)
+        try:
+            visible_columns = set(page.evaluate(f"{js_selector}.fields").split(","))
+        except:
+            import pdb; pdb.set_trace()
         # check if expected columns is contained in the visible columns
         if not set(expected_columns).issubset(visible_columns):
             logging.info(
@@ -995,11 +998,11 @@ def patch_report_filters():
                 logging.error(f"...... could not delete.")
 
 
-@tenacity.retry(
-    stop=tenacity.stop_after_attempt(3),
-    reraise=True,
-    before_sleep=lambda _: logging.info("An error occurred. Retrying..."),
-)
+# @tenacity.retry(
+#     stop=tenacity.stop_after_attempt(3),
+#     reraise=True,
+#     before_sleep=lambda _: logging.info("An error occurred. Retrying..."),
+# )
 def setup():
     """
     Check that WorkArena is installed correctly in the instance.

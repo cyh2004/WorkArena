@@ -44,6 +44,7 @@ from ..config import (
 from .base import AbstractServiceNowTask
 from .utils.form import fill_text
 from .utils.utils import check_url_suffix_match
+from .cyh_utils import select_option_by_coordinate
 
 
 LISTS = {
@@ -403,11 +404,79 @@ class SortListTask(ServiceNowListTask):
 
             # Choose field
             logging.debug(f"Choosing sorting field {field_txt}")
-            field_selector.select_option(field_txt)
+            # field_selector.select_option(field_txt)
+            field_selector = row.locator("div.filerTableSelect")
+            field_selector.click()
+            input_divs = iframe.locator("div.select2-search").all()
+            input_div = None
+            for div in input_divs:
+                if div.is_visible():
+                    input_div = div
+                    break
+            assert input_div is not None, f"Could not find input div for {field_txt}"
+            input_box = input_div.locator("input").first
+            input_box.click()
+            input_box.fill(field_txt)
+            matches = iframe.locator("div.select2-result-label").all()
+            found = False
+            for match in matches:
+                if match.text_content() == field_txt:
+                    match.click()
+                    found = True
+                    break
+            assert found, f"Could not find option {field_txt} in the list"
+
+            bbox = field_selector.bounding_box()
+            x = bbox["x"] + bbox["width"] / 2
+            y = bbox["y"] + bbox["height"] / 2
+            page.mouse.move(x, y, record=False)
 
             # Choose sort order
             logging.debug(f"Choosing sorting direction {dir_txt}")
-            dir_selector.select_option(dir_txt)
+            select_option_by_coordinate(page, dir_selector, dir_txt)
+            # dir_selector.select_option(dir_txt)
+            # dir_selector.click()
+            # ops = dir_selector.locator("option").all()
+            # nth = -1
+            # for op in ops:
+            #     if op.evaluate("el => el.getAttribute('value')") == dir_txt:
+            #         nth = ops.index(op)
+            #         break
+            # assert nth != -1, f"Could not find option {dir_txt}"
+
+            # fontSize = ops[nth].evaluate('el => {return getComputedStyle(el).fontSize;}')
+            # assert "px" in fontSize, f"Could not get font size for operator {dir_txt}"
+            # fontSize = int(fontSize.replace("px", ""))
+            # marginTop = ops[nth].evaluate('el => {return getComputedStyle(el).marginTop;}')
+            # assert "px" in marginTop, f"Could not get margin top for operator {dir_txt}"
+            # marginTop = int(marginTop.replace("px", ""))
+            # marginBottom = ops[nth].evaluate('el => {return getComputedStyle(el).marginBottom;}')
+            # assert "px" in marginBottom, f"Could not get margin bottom for operator {dir_txt}"
+            # marginBottom = int(marginBottom.replace("px", ""))
+            # paddingTop = ops[nth].evaluate('el => {return getComputedStyle(el).paddingTop;}')
+            # assert "px" in paddingTop, f"Could not get padding top for operator {dir_txt}"
+            # paddingTop = int(paddingTop.replace("px", ""))
+            # paddingBottom = ops[nth].evaluate('el => {return getComputedStyle(el).paddingBottom;}')
+            # assert "px" in paddingBottom, f"Could not get padding bottom for operator {dir_txt}"
+            # paddingBottom = int(paddingBottom.replace("px", ""))
+
+            # def strict_round(num):
+            #     return int(num + (0.5 if num > 0 else -0.5))
+            # fontSize = strict_round(fontSize * 1.2)
+            # # Calculate the height of the operator
+            # height = fontSize + marginTop + marginBottom + paddingTop + paddingBottom
+
+            # bbox = dir_selector.bounding_box()
+            # x = bbox["x"] + bbox["width"] / 2
+            # y = bbox["y"] + bbox["height"] + height / 2 + nth * height
+            # page.mouse.click(x, y, perform=False)
+
+            # x = bbox["x"] + bbox["width"] / 2
+            # y = bbox["y"] + bbox["height"] / 2
+            # page.mouse.move(x, y, record=False)
+
+            # dir_selector.select_option(dir_txt, record=False)
+
 
         # hack to wait for two events
         n_events_to_wait = 2
@@ -421,6 +490,40 @@ class SortListTask(ServiceNowListTask):
         with page.expect_event("framenavigated", predicate=n_events_passed):
             filter.get_by_label("Run filter").click()
 
+    def partial_validate(self, page: Page) -> float:
+        self._wait_for_ready(page)
+        if self.list_info is None:
+            self.list_info = self._extract_list_info(page)
+
+        iframe, _, _ = self._get_visible_list(page)
+
+        dir_txt = {"asc": "ascending", "desc": "descending"}
+        sort_fields_txt = [
+            self.list_info["columns"][sort_field]["label"] for sort_field in self.sort_fields
+        ]
+        sort_dirs_txt = [dir_txt[sort_dir] for sort_dir in self.sort_dirs]
+
+        filter = iframe.locator(".list_filter")
+
+        # skip filter rows, which are placed before sorting rows
+
+        # Add all sorting conditions
+        num_rows = filter.locator(".filter_row").count()
+        total_scores = 0.0
+        import pdb; pdb.set_trace()
+        for i, (field_txt, dir_txt) in enumerate(zip(sort_fields_txt, sort_dirs_txt)):
+            for row_index in range(1, num_rows):
+                # Refresh since new rows are added at each iteration
+                row = iframe.locator(".filter_row").nth(row_index)
+                chosen_sort_field = row.locator("span.select2-chosen").text_content()
+                chosen_dir = row.locator("select.filerTableSelect").nth(1).evaluate("el => el.value")
+                if chosen_sort_field == field_txt and chosen_dir == dir_txt:
+                    total_scores += 0.5 / len(sort_fields_txt)
+                    break
+                    
+        return total_scores
+                    
+    
     def validate(
         self, page: playwright.sync_api.Page, chat_messages: list[str]
     ) -> Tuple[float, bool, str, dict]:
@@ -709,7 +812,42 @@ class FilterListTask(ServiceNowListTask):
             # Choose field
             logging.debug("Choosing field " + self.filter_columns[i])
             field_selector = row.locator("select.filerTableSelect").first
-            field_selector.select_option(self.filter_columns[i])
+            # field_selector.select_option(self.filter_columns[i])
+
+            options = field_selector.locator("option").all()
+            target_option = None
+            for op in options:
+                if op.evaluate('(el) => el.getAttribute("value")') == self.filter_columns[i]:
+                    target_option = op.text_content()
+                    break
+            assert target_option is not None, f"Could not find option {self.filter_columns[i]}"
+                    
+            field_selector = row.locator("div.filerTableSelect").first
+            field_selector.click()
+            input_divs = iframe.locator("div.select2-search").all()
+            input_div = None
+            for div in input_divs:
+                if div.is_visible():
+                    input_div = div
+                    break
+            assert input_div is not None, f"Could not find input div for {self.filter_columns[i]}"
+            input_box = input_div.locator("input").first
+            input_box.click()
+            input_box.fill(target_option)
+            matches = iframe.locator("div.select2-result-label").all()
+
+            found = False
+            for match in matches:
+                if match.text_content() == target_option:
+                    match.click()
+                    found = True
+                    break
+            assert found, f"Could not find option {target_option} in the list"
+
+            bbox = field_selector.bounding_box()
+            x = bbox["x"] + bbox["width"] / 2
+            y = bbox["y"] + bbox["height"] / 2
+            page.mouse.move(x, y, record=False)
 
             # Select the right operator
             operator = self.filter_operators[i]
@@ -719,7 +857,51 @@ class FilterListTask(ServiceNowListTask):
                 .get_attribute("value")
             )
             logging.debug(f"Choosing operator {operator}")
-            row.locator("select.condOperator").select_option(operator_symbol)
+            operator_selector = row.locator("select.condOperator").first
+            select_option_by_coordinate(page, operator_selector, operator_symbol)
+
+            # row.locator("select.condOperator").first.click()
+            # ops = row.locator("select.condOperator").first.locator("option").all()
+            # nth = -1
+            # for op in ops:
+            #     if op.text_content() == operator:
+            #         nth = ops.index(op)
+            #         break
+            # assert nth != -1, f"Could not find operator {operator}"
+
+            # fontSize = ops[nth].evaluate('el => {return getComputedStyle(el).fontSize;}')
+            # assert "px" in fontSize, f"Could not get font size for operator {operator}"
+            # fontSize = int(fontSize.replace("px", ""))
+            # marginTop = ops[nth].evaluate('el => {return getComputedStyle(el).marginTop;}')
+            # assert "px" in marginTop, f"Could not get margin top for operator {operator}"
+            # marginTop = int(marginTop.replace("px", ""))
+            # marginBottom = ops[nth].evaluate('el => {return getComputedStyle(el).marginBottom;}')
+            # assert "px" in marginBottom, f"Could not get margin bottom for operator {operator}"
+            # marginBottom = int(marginBottom.replace("px", ""))
+            # paddingTop = ops[nth].evaluate('el => {return getComputedStyle(el).paddingTop;}')
+            # assert "px" in paddingTop, f"Could not get padding top for operator {operator}"
+            # paddingTop = int(paddingTop.replace("px", ""))
+            # paddingBottom = ops[nth].evaluate('el => {return getComputedStyle(el).paddingBottom;}')
+            # assert "px" in paddingBottom, f"Could not get padding bottom for operator {operator}"
+            # paddingBottom = int(paddingBottom.replace("px", ""))
+
+            # def strict_round(num):
+            #     return int(num + (0.5 if num > 0 else -0.5))
+            # fontSize = strict_round(fontSize * 1.2)
+            # # Calculate the height of the operator
+            # height = fontSize + marginTop + marginBottom + paddingTop + paddingBottom
+
+            # bbox = row.locator("select.condOperator").first.bounding_box()
+            # x = bbox["x"] + bbox["width"] / 2
+            # y = bbox["y"] + bbox["height"] + height / 2 + nth * height
+
+            # page.mouse.click(x, y, perform=False)
+
+            # x = bbox["x"] + bbox["width"] / 2
+            # y = bbox["y"] + bbox["height"] / 2
+            # page.mouse.move(x, y, record=False)
+
+            # row.locator("select.condOperator").select_option(operator_symbol, record=False)
 
             # Fill in the value
             logging.debug("Filling in value " + self.filter_values[i])
@@ -747,8 +929,188 @@ class FilterListTask(ServiceNowListTask):
                 # expect a selector
                 logging.debug("filling in selector")
                 # Find the value input field
-                input_field = row.locator("#value select")
-                input_field.select_option(self.filter_values[i])
+                # input_field = row.locator("#value select")
+                # bbox = input_field.bounding_box()
+                # ops = input_field.locator("option").all()
+                # nth = -1
+                # for op in ops:
+                #     if op.text_content() == self.filter_values[i]:
+                #         nth = ops.index(op)
+                #         break
+                # assert nth != -1, f"Could not find option {self.filter_values[i]}"
+
+                # x = bbox["x"] + bbox["width"] / 2
+                # y = bbox["y"] + bbox["height"] + height / 2 + nth * height
+
+                # input_field.click()
+                # page.mouse.click(x, y, perform=False)
+
+                # input_field.select_option(self.filter_values[i], record=False)
+                select_option_by_coordinate(page, row.locator("#value select").first, self.filter_values[i], use_text_content=True)
+
+        iframe.locator(".filterToolbar").get_by_text("Run").click()
+        
+    def partial_validate(self, page: Page) -> float:
+        self._wait_for_ready(page)
+
+        iframe, _, _ = self._get_visible_list(page)
+
+        # TODO: Hack to solve issue where the filters were not all removed
+        page.wait_for_timeout(3000)
+
+        # Add all filter conditions
+        for i in range(len(self.filter_columns)):
+            logging.debug(
+                "Adding filter condition for column "
+                + self.filter_columns[i]
+                + " with value "
+                + self.filter_values[i]
+            )
+
+            # Refresh since new rows are added at each iteration
+            filter_rows = iframe.locator(".filter_row")
+            row = filter_rows.nth(i)
+            
+            import pdb; pdb.set_trace()
+
+            # Choose field
+            logging.debug("Choosing field " + self.filter_columns[i])
+            field_selector = row.locator("select.filerTableSelect").first
+            # field_selector.select_option(self.filter_columns[i])
+
+            options = field_selector.locator("option").all()
+            target_option = None
+            for op in options:
+                if op.evaluate('(el) => el.getAttribute("value")') == self.filter_columns[i]:
+                    target_option = op.text_content()
+                    break
+            assert target_option is not None, f"Could not find option {self.filter_columns[i]}"
+                    
+            field_selector = row.locator("div.filerTableSelect").first
+            field_selector.click()
+            input_divs = iframe.locator("div.select2-search").all()
+            input_div = None
+            for div in input_divs:
+                if div.is_visible():
+                    input_div = div
+                    break
+            assert input_div is not None, f"Could not find input div for {self.filter_columns[i]}"
+            input_box = input_div.locator("input").first
+            input_box.click()
+            input_box.fill(target_option)
+            matches = iframe.locator("div.select2-result-label").all()
+
+            found = False
+            for match in matches:
+                if match.text_content() == target_option:
+                    match.click()
+                    found = True
+                    break
+            assert found, f"Could not find option {target_option} in the list"
+
+            bbox = field_selector.bounding_box()
+            x = bbox["x"] + bbox["width"] / 2
+            y = bbox["y"] + bbox["height"] / 2
+            page.mouse.move(x, y, record=False)
+
+            # Select the right operator
+            operator = self.filter_operators[i]
+            operator_symbol = (
+                row.locator("select.condOperator")
+                .get_by_text(operator, exact=True)
+                .get_attribute("value")
+            )
+            logging.debug(f"Choosing operator {operator}")
+            operator_selector = row.locator("select.condOperator").first
+            select_option_by_coordinate(page, operator_selector, operator_symbol)
+
+            # row.locator("select.condOperator").first.click()
+            # ops = row.locator("select.condOperator").first.locator("option").all()
+            # nth = -1
+            # for op in ops:
+            #     if op.text_content() == operator:
+            #         nth = ops.index(op)
+            #         break
+            # assert nth != -1, f"Could not find operator {operator}"
+
+            # fontSize = ops[nth].evaluate('el => {return getComputedStyle(el).fontSize;}')
+            # assert "px" in fontSize, f"Could not get font size for operator {operator}"
+            # fontSize = int(fontSize.replace("px", ""))
+            # marginTop = ops[nth].evaluate('el => {return getComputedStyle(el).marginTop;}')
+            # assert "px" in marginTop, f"Could not get margin top for operator {operator}"
+            # marginTop = int(marginTop.replace("px", ""))
+            # marginBottom = ops[nth].evaluate('el => {return getComputedStyle(el).marginBottom;}')
+            # assert "px" in marginBottom, f"Could not get margin bottom for operator {operator}"
+            # marginBottom = int(marginBottom.replace("px", ""))
+            # paddingTop = ops[nth].evaluate('el => {return getComputedStyle(el).paddingTop;}')
+            # assert "px" in paddingTop, f"Could not get padding top for operator {operator}"
+            # paddingTop = int(paddingTop.replace("px", ""))
+            # paddingBottom = ops[nth].evaluate('el => {return getComputedStyle(el).paddingBottom;}')
+            # assert "px" in paddingBottom, f"Could not get padding bottom for operator {operator}"
+            # paddingBottom = int(paddingBottom.replace("px", ""))
+
+            # def strict_round(num):
+            #     return int(num + (0.5 if num > 0 else -0.5))
+            # fontSize = strict_round(fontSize * 1.2)
+            # # Calculate the height of the operator
+            # height = fontSize + marginTop + marginBottom + paddingTop + paddingBottom
+
+            # bbox = row.locator("select.condOperator").first.bounding_box()
+            # x = bbox["x"] + bbox["width"] / 2
+            # y = bbox["y"] + bbox["height"] + height / 2 + nth * height
+
+            # page.mouse.click(x, y, perform=False)
+
+            # x = bbox["x"] + bbox["width"] / 2
+            # y = bbox["y"] + bbox["height"] / 2
+            # page.mouse.move(x, y, record=False)
+
+            # row.locator("select.condOperator").select_option(operator_symbol, record=False)
+
+            # Fill in the value
+            logging.debug("Filling in value " + self.filter_values[i])
+            type_ = self.list_info["columns"][self.filter_columns[i]]["type"]
+            if type_ in ["string", "reference", "translated_text"]:
+                # expect a textbox
+                logging.debug("filling in textbox")
+
+                # If empty, don't do anything
+                if self.filter_values[i] == "":
+                    continue
+
+                # Find the value input field
+                inputs = row.locator("#value input")
+                input_field = [
+                    inputs.nth(j) for j in range(inputs.count()) if inputs.nth(j).is_visible()
+                ][0]
+                fill_text(
+                    page=page,
+                    iframe=iframe,
+                    input_field=input_field,
+                    value=self.filter_values[i],
+                )
+            else:
+                # expect a selector
+                logging.debug("filling in selector")
+                # Find the value input field
+                # input_field = row.locator("#value select")
+                # bbox = input_field.bounding_box()
+                # ops = input_field.locator("option").all()
+                # nth = -1
+                # for op in ops:
+                #     if op.text_content() == self.filter_values[i]:
+                #         nth = ops.index(op)
+                #         break
+                # assert nth != -1, f"Could not find option {self.filter_values[i]}"
+
+                # x = bbox["x"] + bbox["width"] / 2
+                # y = bbox["y"] + bbox["height"] + height / 2 + nth * height
+
+                # input_field.click()
+                # page.mouse.click(x, y, perform=False)
+
+                # input_field.select_option(self.filter_values[i], record=False)
+                select_option_by_coordinate(page, row.locator("#value select").first, self.filter_values[i], use_text_content=True)
 
         iframe.locator(".filterToolbar").get_by_text("Run").click()
 

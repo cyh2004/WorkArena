@@ -1,0 +1,21 @@
+# ====== task ======
+max_steps: 50
+
+# ====== token ======
+huggingface_token: ''
+wandb_key: 'a1ffdc7f846152c3339870a8ab234dedca6b75c6'
+gemini_key: 'sk-bfXN5efOMXupngK5oywTsaaU8rYqLVnsWzxlFg6lbOdGqv1T'
+
+# ====== agent ======
+agent_name: "test"
+do_sample: True
+temperature: 1.0
+max_new_tokens: 128
+base_url: http://101.126.156.90:55890/v1
+api_key: 'empty'
+
+# ====== log ======
+use_wandb: True
+entity_name: ''
+project_name: 'uitars-test'
+result_dir: 'results'

@@ -34,6 +34,7 @@ from ..config import (
 )
 from ..instance import SNowInstance
 from .utils.utils import check_url_suffix_match
+from .cyh_utils import select_option_by_coordinate
 
 ADDITIONAL_SOFTWARE = [
     "Slack",
@@ -315,11 +316,17 @@ class OrderHardwareTask(AbstractServiceNowTask):
         self._wait_for_ready(page=page)
 
         element = iframe.wait_for_selector(f"h2:has-text('{self.requested_item}')", strict=True)
+        bbox = element.bounding_box()
+        if bbox["y"]  + bbox["width"] / 2 > 700 or bbox["y"] < 60:
+            # Scroll to the element if it is not visible
+            page.mouse.wheel(0, bbox["y"] - 360)
+            sleep(0.5)
         element.click()
         self._wait_for_ready(page=page, wait_for_form_api=True)
 
         quantity_input = iframe.wait_for_selector("#quantity", strict=True)
-        quantity_input.select_option(str(self.quantity))
+        # quantity_input.select_option(str(self.quantity))
+        select_option_by_coordinate(page, quantity_input, str(self.quantity), use_text_content=True)
 
         editable_fields = page.evaluate(f"{self.form_js_selector}.getEditableFields()")
 
@@ -331,7 +338,7 @@ class OrderHardwareTask(AbstractServiceNowTask):
         for field_label, (element, value) in self.requested_configuration.items():
             element_id = lookup_map[field_label]
             control_type = page.evaluate(f"{self.form_js_selector}.getControl('{element_id}').type")
-
+            
             if control_type in ("radio",):
                 num_options = page.evaluate(
                     f"{self.form_js_selector}.getControls('{element_id}').length"
@@ -345,7 +352,16 @@ class OrderHardwareTask(AbstractServiceNowTask):
                         value
                     ):  # the page changes the text dynamically adding subtract/add to the text
                         control_id = control_handle.get_attribute("id")
-                        iframe.wait_for_selector(f'label[for="{control_id}"]', strict=True).click()
+                        radio_selector = iframe.wait_for_selector(f'label[for="{control_id}"]', strict=True)
+                        bbox = radio_selector.bounding_box()
+                        if bbox["y"]  + bbox["width"] / 2 > 700 or bbox["y"] < 60:
+                            # Scroll to the element if it is not visible
+                            page.mouse.wheel(0, bbox["y"] - 360)
+                            sleep(0.5)
+                        if radio_selector.is_checked():
+                            page.click(empty=True)
+                        else:
+                            radio_selector.click()
                         break
             elif control_type == "hidden":
                 element_control = page.evaluate_handle(
@@ -357,18 +373,37 @@ class OrderHardwareTask(AbstractServiceNowTask):
                     element_label = iframe.wait_for_selector(
                         f'label[id="{label_id}"]', strict=True, timeout=1_000
                     )
+                    bbox = element_label.bounding_box()
+                    if bbox["y"]  + bbox["width"] / 2 > 700 or bbox["y"] < 60:
+                        # Scroll to the element if it is not visible
+                        page.mouse.wheel(0, bbox["y"] - 360)
+                        sleep(0.5)
                     element_label.click()
+                else:
+                    page.click(empty=True)
             elif control_type in ("textarea", "text"):
                 element_control = page.evaluate_handle(
                     f"{self.form_js_selector}.getControl('{element_id}')"
                 ).as_element()  # this look superfluous
                 element_id = element_control.get_attribute("id")  # this look superfluous
                 text_element = iframe.query_selector(f'[id="{element_id}"]')
+                bbox = text_element.bounding_box()
+                if bbox["y"]  + bbox["width"] / 2 > 700 or bbox["y"] < 60:
+                    # Scroll to the element if it is not visible
+                    page.mouse.wheel(0, bbox["y"] - 360)
+                    sleep(0.5)
                 text_element.click()
                 fill_text(page=page, input_field=text_element, value=value, iframe=iframe)
 
             elif control_type == "select-one":
-                iframe.locator(f"id={element_id}").select_option(value)
+                # iframe.locator(f"id={element_id}").select_option(value)
+                selector = iframe.locator(f"id={element_id}")
+                bbox = selector.bounding_box()
+                if bbox["y"]  + bbox["width"] / 2 > 700 or bbox["y"] < 60:
+                    # Scroll to the element if it is not visible
+                    page.mouse.wheel(0, bbox["y"] - 360)
+                    sleep(0.5)
+                select_option_by_coordinate(page, selector, value, use_text_content=True)
             else:
                 raise ValueError(f"Unknown control type {control_type}")
 
