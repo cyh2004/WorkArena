@@ -909,6 +909,7 @@ class GenericNewRecordTask(ServiceNowFormTask):
             if self.table_metadata[field]["type"] == "choice":
                 # import pdb; pdb.set_trace()
                 if is_right_option_selected(page, control, str(self.template_record[field]), use_text_content=True):
+                    print("Correct ", field)
                     total_scores += 0.8 / len(task_fields)
                 # control.select_option(str(self.template_record[field]))
 
@@ -916,8 +917,10 @@ class GenericNewRecordTask(ServiceNowFormTask):
             elif self.table_metadata[field]["type"] == "boolean":
                 # import pdb; pdb.set_trace()
                 if control.is_checked() and self.template_record[field] == "true":
+                    print("Correct ", field)
                     total_scores += 0.8 / len(task_fields)
                 elif not control.is_checked() and self.template_record[field] == "false":
+                    print("Correct ", field)
                     total_scores += 0.8 / len(task_fields)
                 # control.set_checked(1 if self.template_record[field] == "true" else 0)
 
@@ -930,6 +933,7 @@ class GenericNewRecordTask(ServiceNowFormTask):
                     input_field=control,
                     value=self.template_record[field],
                 ):
+                    print("Correct ", field)
                     total_scores += 0.8 / len(task_fields)
 
         # Click on the submit button
@@ -983,7 +987,7 @@ class GenericNewRecordTask(ServiceNowFormTask):
         if sys_id is None:
             logging.info("No record has been created.")
             return (
-                0,
+                self.partial_validate(page),
                 False,
                 "",
                 {"message": "The form has not been submitted."},
@@ -1015,6 +1019,12 @@ class GenericNewRecordTask(ServiceNowFormTask):
                 "The record was not found in the database. Perhaps the form was not submitted correctly. "
                 + sys_id,
             )
+            return (
+                self.partial_validate(page),
+                True,
+                "partial_validate",
+                {"message": "partial_validate"},
+            )
             # return (
             #     0,
             #     False,
@@ -1030,21 +1040,23 @@ class GenericNewRecordTask(ServiceNowFormTask):
         }
 
         # Check that the record matches the expected values
+        score = 0.0
         for f in self.task_fields:
-            if record[f] != self.template_record[f]:
-                logging.info(
-                    f'The field "{self.fields[f]["label"]}" has the wrong value. Expected: "{self.template_record[f]}", got: "{record[f]}".'
-                )
-                error_msg = f'The field "{self.fields[f]["label"]}" has the wrong value.'
-                return (
-                    0,
-                    True,  # End episode (incorrect information pushed to the DB)
-                    error_msg,
-                    {"message": error_msg},
-                )
+            if record[f] == self.template_record[f]:
+                score += 1/len(self.task_fields)
+                # logging.info(
+                #     f'The field "{self.fields[f]["label"]}" has the wrong value. Expected: "{self.template_record[f]}", got: "{record[f]}".'
+                # )
+                # error_msg = f'The field "{self.fields[f]["label"]}" has the wrong value.'
+                # return (
+                #     0,
+                #     True,  # End episode (incorrect information pushed to the DB)
+                #     error_msg,
+                #     {"message": error_msg},
+                # )
 
         return (
-            1,
+            score,
             True,
             "Nice work, thank you!",
             {"message": "The record was successfully created."},

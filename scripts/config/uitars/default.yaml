@@ -11,11 +11,11 @@ agent_name: "test"
 do_sample: True
 temperature: 1.0
 max_new_tokens: 128
-base_url: http://101.126.156.90:55890/v1
+base_url: http://11.11.7.2:8080/v1
 api_key: 'empty'
 
 # ====== log ======
 use_wandb: True
 entity_name: ''
-project_name: 'uitars-test'
+project_name: 'uitars-7b-partial-validation-test'
 result_dir: 'results'

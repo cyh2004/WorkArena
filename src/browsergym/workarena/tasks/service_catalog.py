@@ -303,6 +303,83 @@ class OrderHardwareTask(AbstractServiceNowTask):
         self.request_sysid = None
 
         return goal, info
+    
+    def partial_validate(self, page: Page) -> None:
+        self._wait_for_ready(page=page)
+
+        iframe = page.frame(self.js_prefix)
+        navigation_ul = iframe.locator('ul[aria-label="Navigation"]').first
+        lis = navigation_ul.locator('li').all()
+        
+        if len(lis) != 3:
+            return 0
+        
+        if lis[1].text_content() == 'Hardware' and lis[2].text_content() == self.requested_item:
+            score = 0.3
+            
+            quantity_input = iframe.wait_for_selector("#quantity", strict=True)
+            if quantity_input.evaluate("el => el.value") == str(self.quantity):
+                print("Correct quantity")
+                score += 0.1
+
+            editable_fields = page.evaluate(f"{self.form_js_selector}.getEditableFields()")
+
+            lookup_map = {}
+            for idx, field in enumerate(editable_fields):
+                control_text = self._get_control_description(page, field)
+                lookup_map[control_text] = field
+
+            for field_label, (element, value) in self.requested_configuration.items():
+                element_id = lookup_map[field_label]
+                control_type = page.evaluate(f"{self.form_js_selector}.getControl('{element_id}').type")
+                
+                if control_type in ("radio",):
+                    num_options = page.evaluate(
+                        f"{self.form_js_selector}.getControls('{element_id}').length"
+                    )
+                    for i in range(num_options):
+                        control_handle = page.evaluate_handle(
+                            f"{self.form_js_selector}.getControls('{element_id}')[{i}]"
+                        )
+                        control_text = control_handle.evaluate("e => e.parentElement.innerText")
+                        if control_text.startswith(
+                            value
+                        ):  # the page changes the text dynamically adding subtract/add to the text
+                            control_id = control_handle.get_attribute("id")
+                            radio_selector = iframe.wait_for_selector(f'label[for="{control_id}"]', strict=True)
+                            if radio_selector.is_checked():
+                                print("Correct ", field_label)
+                                score += 0.6 / len(self.requested_configuration)
+                                
+                elif control_type == "hidden":
+                    element_control = page.evaluate_handle(
+                        f"{self.form_js_selector}.getControl('{element_id}')"
+                    )
+                    element_value = element_control.evaluate("e => e.value")
+                    if element_value == str(value).lower():
+                        print("Correct ", field_label)
+                        score += 0.6 / len(self.requested_configuration)
+                        
+                elif control_type in ("textarea", "text"):
+                    element_control = page.evaluate_handle(
+                        f"{self.form_js_selector}.getControl('{element_id}')"
+                    ).as_element()  # this look superfluous
+                    element_id = element_control.get_attribute("id")  # this look superfluous
+                    text_element = iframe.query_selector(f'[id="{element_id}"]')
+                    if text_element.input_value() == value:
+                        print("Correct ", field_label)
+                        score += 0.6 / len(self.requested_configuration)
+
+                elif control_type == "select-one":
+                    # iframe.locator(f"id={element_id}").select_option(value)
+                    selector = iframe.locator(f"id={element_id}")
+                    if selector.evaluate("el => el.value") == value:
+                        print("Correct ", field_label)
+                        score += 0.6 / len(self.requested_configuration)
+                else:
+                    raise ValueError(f"Unknown control type {control_type}")
+            return score
+        return 0
 
     def cheat(self, page: Page, chat_messages: list[str]) -> None:
         super().cheat(page=page, chat_messages=chat_messages)
@@ -513,7 +590,7 @@ class OrderHardwareTask(AbstractServiceNowTask):
         (self.request_sysid,) = parse.parse_qs(current_url.query).get("sysparm_sys_id", [None])
         if self.request_sysid is None:
             return (
-                0,
+                self.partial_validate(page),
                 False,
                 "",
                 {"message": "The request was not created, the sysid is not in the URL."},
@@ -544,39 +621,24 @@ class OrderHardwareTask(AbstractServiceNowTask):
 
         if first_item["short_description"].lower() != self.short_description.lower():
             error_msg = "The requested item is incorrect."
-            return 0, True, error_msg, {"message": error_msg}
+            return 0.3, True, error_msg, {"message": error_msg}
 
         if first_item["quantity"] != str(self.quantity):
             error_msg = "The requested quantity is incorrect."
-            return 0, True, error_msg, {"message": error_msg}
+            return 0.4, True, error_msg, {"message": error_msg}
 
+        score = 0.5
+        num_config = len(self.requested_configuration)
         options = first_item["options"]
         for k, (element_type, value) in self.requested_configuration.items():
             if element_type == "checkbox" or element_type == "radio":
-                if not option_match_heuristic(value, options[k]):
-                    error_msg = (
-                        f"The requested {k} is incorrect, expected {value} but got {options[k]}."
-                    )
-                    return (
-                        0,
-                        True,
-                        error_msg,
-                        {"message": error_msg},
-                    )
+                if option_match_heuristic(value, options[k]):
+                    score += 0.5 / num_config
             elif element_type == "textarea":
-                if value.lower() not in options[k].lower():
-                    error_msg = (
-                        f"The requested {k} is incorrect, expected {value} but got {options[k]}."
-                    )
-                    return (
-                        0,
-                        True,
-                        error_msg,
-                        {"message": error_msg},
-                    )
-
+                if value.lower() in options[k].lower():
+                    score += 0.5 / num_config
         return (
-            1,
+            score,
             True,
             "Nice work, thank you!",
             {"message": "Task completed successfully."},

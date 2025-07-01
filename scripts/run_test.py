@@ -117,11 +117,10 @@ def setup_logger(task_name, task_result_dir, logger_name="runtime"):
     return runtime_logger
 
 @hydra.main(version_base=None, config_path=None, config_name=None)
-def main(config: "DictConfig"):
+def  main(config: "DictConfig"):
     random.shuffle(ATOMIC_TASKS)
-    # agent = PromptAgent(base_url="http://101.126.156.90:55890/v1", api_key="empty")
+    agent = PromptAgent(base_url=config.base_url, api_key=config.api_key)
     for task in all_tasks:
-        task = wa_list.SortAssetListTask
         print("Task:", task)
 
         # Instantiate a new environment
@@ -130,8 +129,7 @@ def main(config: "DictConfig"):
                         slow_mo=1000,
                         action_mapping=HighLevelActionSet("coord", "nav", "tab").to_python_code
                     )
-        obs, info = env.reset()
-        env.task.partial_validate(env.page)
+        obs, info = env.reset(seed=42)
         
         task_result_dir = os.path.join(
             config.result_dir,
@@ -185,7 +183,6 @@ def main(config: "DictConfig"):
                     retry_time = 3
                     while True:
                         try:
-                            import pdb; pdb.set_trace()
                             obs, reward, terminated, truncated, info = env.step(a)
                             break
                         except Exception as e:
