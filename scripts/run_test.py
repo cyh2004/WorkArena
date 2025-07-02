@@ -119,9 +119,10 @@ def setup_logger(task_name, task_result_dir, logger_name="runtime"):
 @hydra.main(version_base=None, config_path=None, config_name=None)
 def  main(config: "DictConfig"):
     random.shuffle(ATOMIC_TASKS)
-    agent = PromptAgent(base_url=config.base_url, api_key=config.api_key)
+    # agent = PromptAgent(base_url=config.base_url, api_key=config.api_key)
     for task in all_tasks:
         print("Task:", task)
+        task = wa_list.FilterHardwareListTask
 
         # Instantiate a new environment
         env = BrowserEnv(task_entrypoint=task,
@@ -130,6 +131,7 @@ def  main(config: "DictConfig"):
                         action_mapping=HighLevelActionSet("coord", "nav", "tab").to_python_code
                     )
         obs, info = env.reset(seed=42)
+        import pdb; pdb.set_trace()
         
         task_result_dir = os.path.join(
             config.result_dir,

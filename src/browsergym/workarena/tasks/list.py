@@ -1032,11 +1032,17 @@ class FilterListTask(ServiceNowListTask):
                     row_target_option = None
                     for op in row_options:
                         if op.evaluate('(el) => el.getAttribute("value")') == self.filter_values[i]:
-                            row_target_option = op.text_content()
+                            row_target_option = op.evaluate('(el) => el.getAttribute("value")')
                             break
+                    if row_target_option is None:
+                        for op in row_options:
+                            if op.text_content() == self.filter_values[i]:
+                                row_target_option = op.evaluate('(el) => el.getAttribute("value")')
+                                break
                     assert row_target_option is not None, f"Could not find option {self.filter_values[i]}"
                     if row.locator("#value select").first.evaluate("el => el.value") == row_target_option:
                         row_success_num += 1
+
                 break
             score += (row_success_num / 3) / len(self.filter_columns)
 
